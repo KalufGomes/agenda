@@ -134,6 +134,11 @@ nav.bottom button.on svg{color:var(--gold)}
 .chk{width:34px;height:34px;border-radius:50%;border:2px solid var(--line);background:#fff;display:grid;place-items:center;flex:none;color:#fff}
 .chk svg{width:16px;height:16px}
 .chk.done{background:var(--green);border-color:var(--green)}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:#EEF0F4;padding:4px;border-radius:11px}
+.seg button{border:0;background:none;border-radius:8px;padding:9px 4px;font-weight:600;font-size:13.5px;color:var(--muted)}
+.seg button.on{background:#fff;color:var(--navy);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.hint{margin:-2px 0 14px;padding:10px 12px;border-radius:10px;background:#FFFBEF;border:1px solid #EADCA6;font-size:13px;line-height:1.45;color:#5C4A12}
+.more{display:block;width:100%;border:0;background:#fff;color:var(--navy);font-weight:600;font-size:13.5px;padding:12px;border-top:1px solid var(--line)}
 .mini-row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px}
 .mini-row:last-child{border-bottom:0}
 .actions{display:flex;gap:8px;margin:12px 0}
@@ -434,7 +439,7 @@ async function carregarFin() {
 }
 
 function calc() {
-  const { contas, movs } = S.fin, h = hoje(), mesAt = h.slice(0, 7), soma = a => a.reduce((s, x) => s + Number(x.valor), 0);
+  const { contas, movs } = S.fin, h = hoje(), em30 = ymd(new Date(Date.now() + 30 * 864e5)), mesAt = h.slice(0, 7), soma = a => a.reduce((s, x) => s + Number(x.valor), 0);
   const recebidas = contas.filter(c => c.tipo === 'receber' && c.status === 'recebido');
   const pagas = contas.filter(c => c.tipo === 'pagar' && c.status === 'pago');
   const abertas = contas.filter(c => c.status === 'aberto');
@@ -443,8 +448,8 @@ function calc() {
   return {
     saldo: soma(recebidas) - soma(pagas) - reservas - soma(repasses),
     reservas,
-    aReceber: soma(abertas.filter(c => c.tipo === 'receber')),
-    aPagar: soma(abertas.filter(c => c.tipo === 'pagar')),
+    aReceber: soma(abertas.filter(c => c.tipo === 'receber' && c.vencimento <= em30)),
+    aPagar: soma(abertas.filter(c => c.tipo === 'pagar' && c.vencimento <= em30)),
     vencidas: abertas.filter(c => c.vencimento < h),
     recMes: soma(recebidas.filter(c => (c.pagoEm || '').startsWith(mesAt))),
     pagMes: soma(pagas.filter(c => (c.pagoEm || '').startsWith(mesAt))),
@@ -467,8 +472,8 @@ function renderFin() {
       <div class="kpis">
         <div class="kpi gold"><small>Reserva 13º (caixinha)</small><div class="v">${brl(c.reservas)}</div></div>
         <div class="kpi ${c.vencidas.length ? 'warn' : ''}"><small>Vencidas</small><div class="v">${c.vencidas.length}</div></div>
-        <div class="kpi"><small>A receber</small><div class="v" style="color:var(--green)">${brl(c.aReceber)}</div></div>
-        <div class="kpi"><small>A pagar</small><div class="v" style="color:var(--red)">${brl(c.aPagar)}</div></div>
+        <div class="kpi"><small>A receber · 30 dias</small><div class="v" style="color:var(--green)">${brl(c.aReceber)}</div></div>
+        <div class="kpi"><small>A pagar · 30 dias</small><div class="v" style="color:var(--red)">${brl(c.aPagar)}</div></div>
       </div>
       <div class="sec-t">Este mês</div>
       <div class="card">
@@ -484,8 +489,13 @@ function renderFin() {
     const todas = S.fin.contas.filter(x => x.tipo === t);
     const ab = todas.filter(x => x.status === 'aberto').sort((a, b) => a.vencimento.localeCompare(b.vencimento));
     const bx = todas.filter(x => x.status !== 'aberto').sort((a, b) => (b.pagoEm || '').localeCompare(a.pagoEm || ''));
-    html += `<div class="sec-t" style="margin-top:4px">Em aberto · ${brl(ab.reduce((s, x) => s + Number(x.valor), 0))}</div>
-      ${ab.length ? `<div class="list">${ab.map(itemConta).join('')}</div>` : '<div class="empty">Nada em aberto.</div>'}
+    const lim = ymd(new Date(Date.now() + 45 * 864e5));
+    const perto = ab.filter(x => x.vencimento <= lim), longe = ab.filter(x => x.vencimento > lim);
+    const mostra = S.verFuturas ? ab : perto;
+    html += `<div class="sec-t" style="margin-top:4px">Em aberto · próximos 45 dias · ${brl(perto.reduce((s, x) => s + Number(x.valor), 0))}</div>
+      ${ab.length ? `<div class="list">${mostra.map(itemConta).join('') || '<div class="empty">Nada nos próximos 45 dias.</div>'}
+        ${longe.length ? `<button class="more" id="bFut">${S.verFuturas ? 'Ocultar lançamentos futuros' : `Ver mais ${longe.length} futuros · ${brl(longe.reduce((s, x) => s + Number(x.valor), 0))}`}</button>` : ''}</div>`
+        : '<div class="empty">Nada em aberto.</div>'}
       <div class="sec-t">${t === 'pagar' ? 'Pagas' : 'Recebidas'}</div>
       ${bx.length ? `<div class="list">${bx.map(itemConta).join('')}</div>` : '<div class="empty">Nenhuma ainda.</div>'}`;
   }
@@ -507,6 +517,7 @@ function renderFin() {
 
   $('#v-fin').innerHTML = html;
   document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => { S.finTab = b.dataset.t; renderFin(); });
+  if ($('#bFut')) $('#bFut').onclick = () => { S.verFuturas = !S.verFuturas; renderFin(); };
   if ($('#bGuardar')) $('#bGuardar').onclick = () => abrirMov({ tipo: 'reserva' });
   if ($('#bResgatar')) $('#bResgatar').onclick = () => abrirMov({ tipo: 'resgate' });
   if ($('#bRepasse')) $('#bRepasse').onclick = () => abrirMov({ tipo: 'repasse' });
@@ -522,6 +533,8 @@ function itemConta(c) {
   if (!aberto) tag = `<span class="tag green">${c.tipo === 'pagar' ? 'Paga' : 'Recebida'} ${dBr(c.pagoEm).slice(0, 5)}</span>`;
   else if (c.vencimento < h) tag = '<span class="tag red">Vencida</span>';
   else if (c.vencimento === h) tag = '<span class="tag orange">Vence hoje</span>';
+  if (c.repeticao === 'parcelada') tag = `<span class="tag">${esc(c.parcela)}</span>` + tag;
+  if (c.repeticao === 'recorrente') tag = `<span class="tag">↻ ${c.periodicidade === 'anual' ? 'anual' : 'mensal'}</span>` + tag;
   const ed = S.fin.podeEditar;
   return `<div class="item ${ed ? 'click' : ''}">
     ${ed ? `<button class="chk ${aberto ? '' : 'done'}" data-baixa="${c.id}" aria-label="Baixar">${aberto ? '' : ICON.check}</button>` : ''}
@@ -552,24 +565,79 @@ function menuNovoFin() {
   });
 }
 
+const repLabel = c => c.repeticao === 'parcelada' ? 'Parcela ' + c.parcela
+  : c.repeticao === 'recorrente' ? (c.periodicidade === 'anual' ? 'Recorrente anual' : 'Recorrente mensal') : '';
+
 function abrirConta(c) {
-  const novo = !c.id;
+  const novo = !c.id, serie = !novo && !!c.serie;
+  const segBtn = (v, t) => `<button type="button" data-rep="${v}">${t}</button>`;
   modal(`<h3>${novo ? 'Nova conta a ' + c.tipo : 'Editar conta'}</h3>
     <label class="f"><span>Descrição</span><input class="in" id="cDesc" value="${esc(c.descricao || '')}" placeholder="${c.tipo === 'pagar' ? 'Ex.: Contador' : 'Ex.: Consultoria cliente'}"></label>
+    ${novo ? `<label class="f"><span>Repetição</span><div class="seg" id="cRep">${segBtn('unica', 'Única')}${segBtn('recorrente', 'Recorrente')}${segBtn('parcelada', 'Parcelada')}</div></label>
+      <div id="cRecBox" hidden><label class="f"><span>Repete</span><select class="in" id="cPer"><option value="mensal">Todo mês</option><option value="anual">Todo ano</option></select></label></div>
+      <div id="cParBox" hidden><div class="row2">
+        <label class="f"><span>Nº de parcelas</span><input class="in" id="cNum" type="number" min="2" max="120" inputmode="numeric" value="2"></label>
+        <label class="f"><span>O valor digitado é</span><select class="in" id="cModo"><option value="parcela">De cada parcela</option><option value="total">O total (dividir)</option></select></label>
+      </div></div>`
+    : serie ? `<div class="banner">↻ ${esc(repLabel(c))}</div>` : ''}
     <div class="row2">
-      <label class="f"><span>Valor (R$)</span><input class="in" id="cVal" inputmode="decimal" value="${c.valor ? String(Number(c.valor).toFixed(2)).replace('.', ',') : ''}" placeholder="0,00"></label>
-      <label class="f"><span>Vencimento</span><input class="in" id="cVen" type="date" value="${c.vencimento || hoje()}"></label>
+      <label class="f"><span id="cValLbl">Valor (R$)</span><input class="in" id="cVal" inputmode="decimal" value="${c.valor ? String(Number(c.valor).toFixed(2)).replace('.', ',') : ''}" placeholder="0,00"></label>
+      <label class="f"><span id="cVenLbl">Vencimento</span><input class="in" id="cVen" type="date" value="${c.vencimento || hoje()}"></label>
     </div>
+    <p class="hint" id="cResumo" hidden></p>
+    ${serie && c.status === 'aberto' ? `<label class="switch"><input type="checkbox" id="cProx" checked>
+      <div><b>Aplicar às próximas em aberto</b><small>Descrição e valor mudam também nas ${c.repeticao === 'parcelada' ? 'parcelas' : 'ocorrências'} seguintes.</small></div></label>` : ''}
     ${!novo && c.status !== 'aberto' ? `<p style="color:var(--muted);font-size:13px">${c.tipo === 'pagar' ? 'Paga' : 'Recebida'} em ${dBr(c.pagoEm)}.
       <a href="#" id="cReabrir" style="color:var(--navy);font-weight:600">Desfazer baixa</a></p>` : ''}
     <div class="foot">${novo ? '' : '<button class="btn danger" id="cDel">Excluir</button>'}<button class="btn pri" id="cSalvar">Salvar</button></div>`);
+
+  let rep = 'unica';
+  const resumo = () => {
+    if (!novo) return;
+    const v = numBr($('#cVal').value), ven = $('#cVen').value, p = $('#cResumo');
+    $('#cRecBox').hidden = rep !== 'recorrente'; $('#cParBox').hidden = rep !== 'parcelada';
+    $('#cVenLbl').textContent = rep === 'unica' ? 'Vencimento' : '1º vencimento';
+    $('#cValLbl').textContent = rep === 'parcelada' && $('#cModo').value === 'total' ? 'Valor total (R$)' : rep === 'parcelada' ? 'Valor da parcela (R$)' : 'Valor (R$)';
+    p.hidden = rep === 'unica' || !ven;
+    if (p.hidden) return;
+    const dia = Number(ven.slice(8, 10));
+    if (rep === 'recorrente') {
+      const anual = $('#cPer').value === 'anual';
+      p.innerHTML = `Vai lançar ${anual ? 'todo ano' : 'todo dia ' + dia} ${v ? 'no valor de <b>' + brl(v) + '</b>' : ''}. O app mantém sempre os próximos ${anual ? '3 anos' : '12 meses'} lançados.<br>Para parar, abra uma delas e use <b>Excluir › esta e as próximas</b>.`;
+    } else {
+      const n = Math.max(2, Math.floor(Number($('#cNum').value) || 2)), total = $('#cModo').value === 'total';
+      const cada = total ? v / n : v;
+      p.innerHTML = v ? `<b>${n}x de ${brl(cada)}</b> · total ${brl(total ? v : v * n)}<br>Última parcela em ${dBr(somaMeses(ven, n - 1, dia))}.` : `${n} parcelas mensais, a última em ${dBr(somaMeses(ven, n - 1, dia))}.`;
+    }
+  };
+  if (novo) {
+    const marcar = () => document.querySelectorAll('#cRep button').forEach(b => b.classList.toggle('on', b.dataset.rep === rep));
+    document.querySelectorAll('#cRep button').forEach(b => b.onclick = () => { rep = b.dataset.rep; marcar(); resumo(); });
+    marcar();
+    ['#cVal', '#cVen', '#cNum', '#cModo', '#cPer'].forEach(s => { $(s).oninput = resumo; $(s).onchange = resumo; });
+  }
+
   $('#cSalvar').onclick = async () => {
     const conta = { id: c.id, tipo: c.tipo, descricao: $('#cDesc').value, valor: numBr($('#cVal').value), vencimento: $('#cVen').value };
-    try { await api('salvarConta', { conta }); fecharModal(); toast('Lançamento salvo'); carregarFin(); } catch (e) { toast(e.message); }
+    if (novo) Object.assign(conta, { repeticao: rep, periodicidade: $('#cPer').value, parcelas: Number($('#cNum').value), modoValor: $('#cModo').value });
+    if ($('#cProx') && $('#cProx').checked) conta.escopo = 'proximas';
+    try {
+      const r = await api('salvarConta', { conta }); fecharModal();
+      toast(r.criadas > 1 ? `${r.criadas} lançamentos criados ✓` : 'Lançamento salvo'); carregarFin();
+    } catch (e) { toast(e.message); }
   };
-  if (!novo) $('#cDel').onclick = async () => {
-    if (!confirm('Excluir este lançamento?')) return;
-    try { await api('excluirConta', { id: c.id }); fecharModal(); toast('Excluído'); carregarFin(); } catch (e) { toast(e.message); }
+  if (!novo) $('#cDel').onclick = () => {
+    const excluir = async escopo => {
+      try { await api('excluirConta', { id: c.id, escopo }); fecharModal(); toast('Excluído'); carregarFin(); } catch (e) { toast(e.message); }
+    };
+    if (!serie) { if (confirm('Excluir este lançamento?')) excluir('esta'); return; }
+    modal(`<h3>Excluir lançamento</h3><p style="margin:0 0 14px;color:var(--muted)">${esc(c.descricao)} · ${esc(repLabel(c))}</p>
+      <div style="display:grid;gap:8px">
+        <button class="btn ghost block" id="xEsta">Só esta</button>
+        <button class="btn danger block" id="xProx">Esta e as próximas em aberto${c.repeticao === 'recorrente' ? ' (encerra a recorrência)' : ''}</button>
+        <button class="btn ghost block" onclick="fecharModal()">Cancelar</button></div>`);
+    $('#xEsta').onclick = () => excluir('esta');
+    $('#xProx').onclick = () => excluir('proximas');
   };
   if ($('#cReabrir')) $('#cReabrir').onclick = async ev => {
     ev.preventDefault();
@@ -623,7 +691,13 @@ function abrirMov(m) {
   };
 }
 
-const numBr = s => Number(String(s).trim().replace(/\./g, '').replace(',', '.')) || 0;
+// soma meses mantendo o dia original (31 vira 30/28 nos meses menores)
+function somaMeses(ymdS, k, dia) {
+  const y = +ymdS.slice(0, 4), m = +ymdS.slice(5, 7) - 1 + k;
+  const ano = y + Math.floor(m / 12), mes = ((m % 12) + 12) % 12, ult = new Date(ano, mes + 1, 0).getDate();
+  return ano + '-' + pad(mes + 1) + '-' + pad(Math.min(dia, ult));
+}
+const numBr = s => { s = String(s).trim(); return Number(s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s) || 0; };
 
 /* ================= CONTA ================= */
 function renderConta() {
@@ -695,7 +769,10 @@ const Demo = (() => {
     { id: nid(), tipo: 'receber', descricao: 'Consultoria — cliente A', valor: '3500.00', vencimento: d(-3), status: 'recebido', pagoEm: d(-3) },
     { id: nid(), tipo: 'receber', descricao: 'Consultoria — cliente B', valor: '2800.00', vencimento: d(5), status: 'aberto', pagoEm: '' },
     { id: nid(), tipo: 'pagar', descricao: 'Hospedagem do site', valor: '39.90', vencimento: d(-1), status: 'aberto', pagoEm: '' },
-    { id: nid(), tipo: 'pagar', descricao: 'Contador', valor: '450.00', vencimento: d(8), status: 'aberto', pagoEm: '' },
+    ...Array.from({ length: 12 }, (_, i) => ({ id: nid(), tipo: 'pagar', descricao: 'Contador', valor: '450.00', vencimento: somaMeses(d(8), i, +d(8).slice(8)),
+      status: 'aberto', pagoEm: '', repeticao: 'recorrente', periodicidade: 'mensal', serie: 's1' })),
+    ...Array.from({ length: 3 }, (_, i) => ({ id: nid(), tipo: 'receber', descricao: 'Treinamento de liderança', valor: '1200.00', vencimento: somaMeses(d(-2), i, +d(-2).slice(8)),
+      status: i ? 'aberto' : 'recebido', pagoEm: i ? '' : d(-2), repeticao: 'parcelada', parcela: (i + 1) + '/3', periodicidade: 'mensal', serie: 's2' })),
     { id: nid(), tipo: 'pagar', descricao: 'Material de treinamento', valor: '180.00', vencimento: d(-4), status: 'pago', pagoEm: d(-4) }
   ];
   let movs = [
@@ -742,16 +819,37 @@ const Demo = (() => {
         const x = p.conta;
         if (!String(x.descricao).trim()) return err('Informe a descrição.');
         if (!(x.valor > 0)) return err('Informe um valor maior que zero.');
-        if (x.id) { const c = contas.find(c => c.id === x.id); Object.assign(c, { descricao: x.descricao, valor: x.valor.toFixed(2), vencimento: x.vencimento }); }
-        else contas.push({ id: nid(), tipo: x.tipo, descricao: x.descricao, valor: x.valor.toFixed(2), vencimento: x.vencimento, status: 'aberto', pagoEm: '' });
-        return { ok: true };
+        if (x.id) {
+          const c = contas.find(c => c.id === x.id);
+          Object.assign(c, { descricao: x.descricao, valor: x.valor.toFixed(2), vencimento: x.vencimento });
+          if (x.escopo === 'proximas' && c.serie) contas.forEach(o => { if (o.serie === c.serie && o !== c && o.status === 'aberto' && o.vencimento > c.vencimento) Object.assign(o, { descricao: x.descricao, valor: x.valor.toFixed(2) }); });
+          return { ok: true };
+        }
+        const rep = x.repeticao || 'unica', dia = +x.vencimento.slice(8, 10), base = { tipo: x.tipo, descricao: x.descricao, status: 'aberto', pagoEm: '', repeticao: rep };
+        if (rep === 'unica') { contas.push({ ...base, id: nid(), valor: x.valor.toFixed(2), vencimento: x.vencimento }); return { ok: true, criadas: 1 }; }
+        const serie = nid(), novas = [];
+        if (rep === 'parcelada') {
+          const n = Math.floor(x.parcelas); if (!(n >= 2 && n <= 120)) return err('Informe de 2 a 120 parcelas.');
+          const cent = Math.round(x.valor * 100), cada = x.modoValor === 'total' ? Math.floor(cent / n) : cent;
+          for (let i = 0; i < n; i++) novas.push({ ...base, id: nid(), serie, parcela: (i + 1) + '/' + n, periodicidade: 'mensal',
+            valor: ((x.modoValor === 'total' && i === n - 1 ? cent - cada * (n - 1) : cada) / 100).toFixed(2), vencimento: somaMeses(x.vencimento, i, dia) });
+        } else {
+          const anual = x.periodicidade === 'anual';
+          for (let i = 0; i < (anual ? 3 : 12); i++) novas.push({ ...base, id: nid(), serie, periodicidade: anual ? 'anual' : 'mensal',
+            valor: x.valor.toFixed(2), vencimento: somaMeses(x.vencimento, i * (anual ? 12 : 1), dia) });
+        }
+        contas.push(...novas); return { ok: true, criadas: novas.length };
       }
       case 'baixarConta': {
         const c = contas.find(c => c.id === p.id);
         if (p.reabrir) { c.status = 'aberto'; c.pagoEm = ''; } else { c.status = c.tipo === 'pagar' ? 'pago' : 'recebido'; c.pagoEm = p.data || hoje(); }
         return { ok: true };
       }
-      case 'excluirConta': contas = contas.filter(c => c.id !== p.id); return { ok: true };
+      case 'excluirConta': {
+        const c = contas.find(c => c.id === p.id); if (!c) return { ok: true };
+        contas = contas.filter(o => !(o === c || (p.escopo === 'proximas' && c.serie && o.serie === c.serie && o.status === 'aberto' && o.vencimento > c.vencimento)));
+        return { ok: true };
+      }
       case 'salvarMov': {
         const x = p.mov;
         if (!(x.valor > 0)) return err('Informe um valor maior que zero.');
