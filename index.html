@@ -60,6 +60,17 @@ textarea.in{min-height:70px;resize:vertical}
 header.top{position:sticky;top:0;z-index:20;background:var(--navy);color:#fff;padding:12px 16px;padding-top:calc(12px + env(safe-area-inset-top,0px));
   display:flex;align-items:center;justify-content:space-between}
 header.top .logo{font-size:16px}
+.top-r{display:flex;align-items:center;gap:8px}
+.bell{position:relative;width:38px;height:38px;border-radius:50%;border:0;background:rgba(255,255,255,.1);color:#fff;display:grid;place-items:center}
+.bell svg{width:20px;height:20px}
+.badge{position:absolute;top:-3px;right:-3px;min-width:19px;height:19px;padding:0 5px;border-radius:10px;background:#E5484D;color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center;border:2px solid var(--navy)}
+.av-item{display:flex;gap:12px;align-items:flex-start;padding:12px 2px;border-bottom:1px solid var(--line);cursor:pointer;width:100%;background:none;border-left:0;border-right:0;border-top:0;text-align:left}
+.av-item:last-child{border-bottom:0}
+.av-ic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex:none;font-size:16px;background:#EEF0F4}
+.av-ic.red{background:#FBE6E3}.av-ic.gold{background:#FBF4DD}.av-ic.blue{background:#E6EEFB}
+.av-item b{display:block;font-size:14.5px;color:var(--text)}
+.av-item small{color:var(--muted);font-size:12.5px}
+.av-new{width:8px;height:8px;border-radius:50%;background:#E5484D;flex:none;margin-top:6px}
 .chip-user{display:flex;align-items:center;gap:7px;font-size:13px;background:rgba(255,255,255,.1);padding:5px 10px 5px 6px;border-radius:20px}
 .dot{width:10px;height:10px;border-radius:50%;flex:none}
 .avatar{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;color:var(--navy)}
@@ -184,7 +195,10 @@ nav.bottom button.on svg{color:var(--gold)}
 <div id="app" hidden>
   <header class="top">
     <div class="logo"><img class="simb" src="simbolo.svg" alt=""> Kaluf &amp; Gomes</div>
-    <div class="chip-user" id="chipUser"></div>
+    <div class="top-r">
+      <button class="bell" id="bell" aria-label="Avisos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8M10 21h4"/></svg><span class="badge" id="badge" hidden></span></button>
+      <div class="chip-user" id="chipUser"></div>
+    </div>
   </header>
   <main>
     <section id="v-agenda"></section>
@@ -208,7 +222,7 @@ nav.bottom button.on svg{color:var(--gold)}
    CONFIGURAÇÃO — cole aqui a URL do Apps Script (termina em /exec).
    Enquanto estiver vazia, o app roda em MODO DEMONSTRAÇÃO.
    ============================================================ */
-const API_URL = '';
+const API_URL = 'https://script.google.com/macros/s/AKfycbxDcUBx8zx0Oe7KII2IRSCGTpmHCsCKIbl-4EcMApZrO3J5pf09N2-KItQV5uK6iMAD/exec';
 
 /* ---------------- utilidades ---------------- */
 const $ = s => document.querySelector(s);
@@ -247,8 +261,8 @@ const outra = () => S.users.find(x => x.usuario !== S.user.usuario) || { nome: '
 const isAdmin = () => S.user && S.user.papel === 'admin';
 
 /* ---------------- API ---------------- */
-async function api(acao, dados = {}) {
-  $('#busy').hidden = false;
+async function api(acao, dados = {}, quieto) {
+  if (!quieto) $('#busy').hidden = false;
   try {
     let j;
     if (!API_URL) j = await Demo.call(acao, { ...dados, token: S.token });
@@ -284,12 +298,15 @@ function entrar(r) {
   $('#login').hidden = true; $('#app').hidden = false;
   const u = S.user;
   $('#chipUser').innerHTML = `<span class="avatar" style="background:${u.cor}">${esc(u.nome[0])}</span>${esc(u.nome)}`;
+  S.fin = null; S.eventos = [];
   ir('agenda');
+  iniciarAvisos();
 }
 
 async function sair(silencioso) {
   if (!silencioso && S.token) { try { await api('sair'); } catch (e) {} }
-  store.del('kaluf_token'); S.token = null; S.user = null;
+  pararAvisos();
+  store.del('kaluf_token'); S.token = null; S.user = null; S.fin = null; S.eventos = [];
   $('#app').hidden = true; $('#login').hidden = false; fecharModal();
 }
 
@@ -428,7 +445,7 @@ function abrirEvento(e) {
     catch (er) { toast(er.message); }
   };
   if (!novo) $('#eDel').onclick = async () => {
-    if (!confirm('Excluir este compromisso?')) return;
+    if (!await confirmar('Excluir este compromisso?')) return;
     try { await api('excluirEvento', { id: e.id }); fecharModal(); toast('Compromisso excluído'); carregarAgenda(); }
     catch (er) { toast(er.message); }
   };
@@ -441,7 +458,11 @@ function verEvento(e) {
     <div class="mini-row"><span>Quando</span><b>${dBr(e.data)} · ${e.diaInteiro === 'sim' ? 'dia inteiro' : e.inicio + '–' + e.fim}</b></div>
     ${e.local ? `<div class="mini-row"><span>Local</span><b>${esc(e.local)}</b></div>` : ''}
     ${e.obs ? `<p style="white-space:pre-wrap;color:var(--muted)">${esc(e.obs)}</p>` : ''}
-    <div class="foot" style="margin-top:14px"><button class="btn ghost" onclick="fecharModal()">Fechar</button></div>`);
+    <div class="foot" style="margin-top:14px">${e.podeExcluir ? '<button class="btn danger" id="vDel">Excluir</button>' : ''}<button class="btn ghost" onclick="fecharModal()">Fechar</button></div>`);
+  if (e.podeExcluir) $('#vDel').onclick = async () => {
+    if (!await confirmar(`Excluir "${e.titulo}" da agenda de ${u.nome}?`)) return;
+    try { await api('excluirEvento', { id: e.id }); fecharModal(); toast('Compromisso excluído'); carregarAgenda(); } catch (er) { toast(er.message); }
+  };
 }
 
 /* ================= FINANCEIRO ================= */
@@ -642,7 +663,7 @@ function abrirConta(c) {
     const excluir = async escopo => {
       try { await api('excluirConta', { id: c.id, escopo }); fecharModal(); toast('Excluído'); carregarFin(); } catch (e) { toast(e.message); }
     };
-    if (!serie) { if (confirm('Excluir este lançamento?')) excluir('esta'); return; }
+    if (!serie) { confirmar('Excluir este lançamento?').then(ok => ok && excluir('esta')); return; }
     modal(`<h3>Excluir lançamento</h3><p style="margin:0 0 14px;color:var(--muted)">${esc(c.descricao)} · ${esc(repLabel(c))}</p>
       <div style="display:grid;gap:8px">
         <button class="btn ghost block" id="xEsta">Só esta</button>
@@ -698,7 +719,7 @@ function abrirMov(m) {
     } catch (e) { toast(e.message); }
   };
   if (!novo) $('#mDel').onclick = async () => {
-    if (!confirm('Excluir este lançamento?')) return;
+    if (!await confirmar('Excluir este lançamento?')) return;
     try { await api('excluirMov', { id: m.id }); fecharModal(); toast('Excluído'); carregarFin(); } catch (e) { toast(e.message); }
   };
 }
@@ -723,6 +744,13 @@ function renderConta() {
       <p style="font-size:12.5px;color:var(--muted);margin:-4px 0 12px">Deixe as notificações do Gmail ligadas no celular para receber os avisos na hora.</p>
       <button class="btn pri block" id="cfSalvarEmail">Salvar e-mail</button>
     </div>
+    <div class="sec-t">Notificações no celular</div>
+    <div class="card">
+      <p style="margin:0 0 12px;font-size:13.5px;line-height:1.45">O sininho 🔔 no topo mostra seus compromissos de hoje e amanhã, contas vencendo e o que ${esc(outra().nome)} marcou com você.
+      Ativando abaixo, o celular também mostra a notificação na tela.</p>
+      <p id="nfStatus" style="font-size:12.5px;color:var(--muted);margin:0 0 12px"></p>
+      <button class="btn gold block" id="nfAtivar">Ativar notificações</button>
+    </div>
     <div class="sec-t">Trocar senha</div>
     <div class="card">
       <label class="f"><span>Senha atual</span><input class="in" id="cfAtual" type="password" autocomplete="current-password"></label>
@@ -740,6 +768,17 @@ function renderConta() {
     try { await api('trocarSenha', { atual: $('#cfAtual').value, nova: $('#cfNova').value }); toast('Senha trocada ✓'); renderConta(); } catch (e) { toast(e.message); }
   };
   $('#cfSair').onclick = () => sair();
+  const st = () => {
+    const p = 'Notification' in window ? Notification.permission : 'indisponivel';
+    $('#nfStatus').textContent = { granted: '✅ Notificações ativadas neste aparelho.', denied: '⛔ Bloqueadas. Libere nas configurações do navegador/app (Notificações › permitir).',
+      default: 'Ainda não ativadas neste aparelho.', indisponivel: 'Este navegador não suporta notificações. Instale o app pela tela inicial.' }[p];
+    $('#nfAtivar').hidden = p !== 'default';
+  };
+  st();
+  $('#nfAtivar').onclick = async () => {
+    try { await Notification.requestPermission(); } catch (e) {}
+    st(); if (Notification.permission === 'granted') { notificar('Notificações ativadas ✓', 'Você vai ver os avisos da agenda e das contas aqui.'); carregarAvisos(); }
+  };
 }
 
 /* ================= modal / toast ================= */
@@ -755,6 +794,128 @@ function toast(msg, acao, fn) {
   t.hidden = false;
   if (acao) t.querySelector('button').onclick = () => { t.hidden = true; fn(); };
   clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, acao ? 7000 : 3000);
+}
+
+/* ================= confirmação ================= */
+function confirmar(msg, ok = 'Excluir') {
+  return new Promise(res => {
+    modal(`<h3>${esc(msg)}</h3><div class="foot"><button class="btn ghost" id="qN">Cancelar</button><button class="btn danger" id="qS">${ok}</button></div>`);
+    $('#qN').onclick = () => { fecharModal(); res(false); };
+    $('#qS').onclick = () => res(true);
+  });
+}
+
+/* ================= AVISOS (sininho + notificações) ================= */
+const Av = { lista: [], timers: [], poll: null };
+const chaveAv = k => 'kaluf_' + k + '_' + (S.user ? S.user.usuario : '');
+const lerSet = k => { try { return new Set(JSON.parse(store.get(chaveAv(k)) || '[]')); } catch (e) { return new Set(); } };
+const gravarSet = (k, s) => store.set(chaveAv(k), JSON.stringify([...s].slice(-400)));
+
+function iniciarAvisos() {
+  pararAvisos();
+  carregarAvisos();
+  Av.poll = setInterval(carregarAvisos, 5 * 60e3);
+}
+function pararAvisos() {
+  clearInterval(Av.poll); Av.timers.forEach(clearTimeout); Av.timers = []; Av.lista = [];
+  $('#badge').hidden = true;
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.user) carregarAvisos(); });
+$('#bell').onclick = abrirAvisos;
+
+async function carregarAvisos() {
+  if (!S.user) return;
+  let ag, fin;
+  try {
+    [ag, fin] = await Promise.all([
+      api('agenda', { de: hoje(), ate: ymd(new Date(Date.now() + 90 * 864e5)) }, true),
+      api('financeiro', {}, true)
+    ]);
+  } catch (e) { return; }
+  if (!S.user) return;
+  const h = hoje(), am = ymd(new Date(Date.now() + 864e5)), em3 = ymd(new Date(Date.now() + 3 * 864e5));
+  const agoraHM = pad(new Date().getHours()) + ':' + pad(new Date().getMinutes());
+  const semana = ymd(new Date(Date.now() - 7 * 864e5)).replace(/-/g, '');
+  const lista = [];
+
+  ag.eventos.forEach(e => {
+    if (e.oculto) return;
+    const hora = e.diaInteiro === 'sim' ? 'dia inteiro' : e.inicio + '–' + e.fim;
+    // meus compromissos (ou nós duas) de hoje e amanhã
+    if (e.meu && (e.data === h || e.data === am) && !(e.data === h && e.diaInteiro !== 'sim' && e.fim && e.fim < agoraHM)) {
+      lista.push({ id: 'ev:' + e.id + ':' + e.data + ':' + e.inicio, ic: '📅', cor: 'gold', ord: e.data + (e.inicio || '00:00'),
+        tit: e.titulo, sub: (e.data === h ? 'Hoje' : 'Amanhã') + ' · ' + hora + (e.juntas === 'sim' ? ' · nós duas' : ''),
+        ir: () => { S.dia = e.data; S.mes = new Date(+e.data.slice(0, 4), +e.data.slice(5, 7) - 1, 1); ir('agenda'); } });
+    }
+    // novidades: a outra marcou algo com você (nós duas) ou visível
+    const criado = String(e.criadoEm || '').slice(0, 10).replace(/-/g, '');
+    if (e.dono !== S.user.usuario && criado >= semana) {
+      const quem = userOf(e.dono).nome;
+      lista.push({ id: 'novo:' + e.id + ':' + e.data + ':' + e.inicio, ic: e.juntas === 'sim' ? '👥' : '🗓️', cor: 'blue', ord: '0' + criado,
+        tit: e.juntas === 'sim' ? `${quem} marcou com você: ${e.titulo}` : `${quem} marcou: ${e.titulo}`,
+        sub: dBr(e.data) + ' · ' + hora,
+        ir: () => { S.dia = e.data; S.mes = new Date(+e.data.slice(0, 4), +e.data.slice(5, 7) - 1, 1); ir('agenda'); } });
+    }
+  });
+
+  fin.contas.filter(c => c.status === 'aberto' && c.vencimento <= em3).forEach(c => {
+    const venc = c.vencimento < h ? 'Vencida em ' + dBr(c.vencimento) : c.vencimento === h ? 'Vence hoje' : 'Vence ' + dBr(c.vencimento);
+    lista.push({ id: 'ct:' + c.id + ':' + (c.vencimento < h ? 'atr' : c.vencimento === h ? 'hoje' : 'logo'), ic: c.tipo === 'pagar' ? '🧾' : '💵',
+      cor: c.vencimento < h ? 'red' : '', ord: '1' + c.vencimento,
+      tit: (c.tipo === 'pagar' ? 'Pagar: ' : 'Receber: ') + c.descricao + ' · ' + brl(c.valor), sub: venc,
+      ir: () => { S.finTab = c.tipo; ir('fin'); } });
+  });
+
+  Av.lista = lista;
+  const vistos = lerSet('vistos'), notif = lerSet('notif');
+  const novos = lista.filter(a => !vistos.has(a.id));
+  $('#badge').hidden = !novos.length; $('#badge').textContent = novos.length > 9 ? '9+' : novos.length;
+
+  // notificação do celular para o que ainda não foi avisado
+  const aNotificar = novos.filter(a => !notif.has(a.id));
+  if (aNotificar.length) {
+    if (aNotificar.length <= 3) aNotificar.forEach(a => notificar(a.tit, a.sub, a.id));
+    else notificar(`${aNotificar.length} avisos novos`, aNotificar.slice(0, 3).map(a => a.tit).join(' · '), 'resumo');
+    aNotificar.forEach(a => notif.add(a.id)); gravarSet('notif', notif);
+  }
+
+  // lembretes no horário certo (enquanto o app estiver aberto/em segundo plano)
+  Av.timers.forEach(clearTimeout); Av.timers = [];
+  ag.eventos.forEach(e => {
+    const min = Number(e.lembrete) || 0;
+    if (!e.meu || !min || e.diaInteiro === 'sim' || !e.inicio || e.oculto) return;
+    const ini = new Date(e.data + 'T' + e.inicio + ':00').getTime(), quando = ini - min * 60e3, falta = quando - Date.now();
+    if (falta > 0 && falta < 12 * 3600e3) {
+      Av.timers.push(setTimeout(() => notificar('⏰ ' + e.titulo, 'Começa às ' + e.inicio + (e.local ? ' · ' + e.local : ''), 'lem:' + e.id), falta));
+    }
+  });
+}
+
+function abrirAvisos() {
+  const vistos = lerSet('vistos');
+  const grupo = (t, arr) => arr.length ? `<div class="sec-t" style="margin-top:6px">${t}</div>` + arr.map(a =>
+    `<button class="av-item" data-av="${esc(a.id)}"><span class="av-ic ${a.cor}">${a.ic}</span><span style="flex:1;min-width:0"><b>${esc(a.tit)}</b><small>${esc(a.sub)}</small></span>${vistos.has(a.id) ? '' : '<span class="av-new"></span>'}</button>`).join('') : '';
+  const L = Av.lista;
+  const ord = (a, b) => a.ord.localeCompare(b.ord);
+  const html = grupo('Agenda', L.filter(a => a.id.startsWith('ev:')).sort(ord))
+    + grupo('Contas', L.filter(a => a.id.startsWith('ct:')).sort(ord))
+    + grupo('Novidades', L.filter(a => a.id.startsWith('novo:')).sort(ord).reverse());
+  modal(`<h3>🔔 Avisos</h3>${html || '<div class="empty">Tudo em dia por aqui ✨</div>'}
+    ${'Notification' in window && Notification.permission === 'default' ? '<button class="btn gold block" id="avAtivar" style="margin-top:14px">Receber também como notificação do celular</button>' : ''}`);
+  document.querySelectorAll('[data-av]').forEach(b => b.onclick = () => { const a = L.find(x => x.id === b.dataset.av); fecharModal(); a && a.ir(); });
+  if ($('#avAtivar')) $('#avAtivar').onclick = async () => { try { await Notification.requestPermission(); } catch (e) {} abrirAvisos(); };
+  L.forEach(a => vistos.add(a.id)); gravarSet('vistos', vistos);
+  $('#badge').hidden = true;
+}
+
+async function notificar(titulo, corpo, tag) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const op = { body: corpo || '', icon: 'icon-192.png', badge: 'icon-192.png', tag: tag || String(Date.now()), data: { url: location.href } };
+  try {
+    const reg = 'serviceWorker' in navigator && await navigator.serviceWorker.getRegistration();
+    if (reg) return reg.showNotification(titulo, op);
+    new Notification(titulo, op);
+  } catch (e) {}
 }
 
 /* ================= PWA ================= */
@@ -774,7 +935,7 @@ const Demo = (() => {
     { id: nid(), dono: 'taise', titulo: 'Visita ao cliente', data: d(0), inicio: '09:00', fim: '10:30', diaInteiro: 'nao', local: 'Loja do cliente', obs: '', visivel: 'sim', lembrete: '30' },
     { id: nid(), dono: 'raquel', titulo: 'Consulta médica', data: d(0), inicio: '14:00', fim: '15:00', diaInteiro: 'nao', local: '', obs: '', visivel: 'nao', lembrete: '60' },
     { id: nid(), dono: 'taise', titulo: 'Reunião na escola', data: d(1), inicio: '07:30', fim: '08:30', diaInteiro: 'nao', local: '', obs: '', visivel: 'nao', lembrete: '0' },
-    { id: nid(), dono: 'raquel', titulo: 'Treinamento de liderança', data: d(2), inicio: '10:00', fim: '12:00', diaInteiro: 'nao', local: 'Cliente', obs: 'Encontro 2 de 4', visivel: 'sim', lembrete: '30', juntas: 'sim' },
+    { id: nid(), dono: 'raquel', titulo: 'Treinamento de liderança', data: d(2), inicio: '10:00', fim: '12:00', diaInteiro: 'nao', local: 'Cliente', obs: 'Encontro 2 de 4', visivel: 'sim', lembrete: '30', juntas: 'sim', criadoEm: d(0) + ' 08:00' },
     { id: nid(), dono: 'taise', titulo: 'Aniversário da família', data: d(4), inicio: '', fim: '', diaInteiro: 'sim', local: '', obs: '', visivel: 'nao', lembrete: '0' }
   ];
   let contas = [
@@ -807,7 +968,7 @@ const Demo = (() => {
       case 'sair': me = null; return { ok: true };
       case 'agenda': return { ok: true, eventos: ev.filter(e => e.data >= p.de && e.data <= p.ate).map(e => {
         const meu = e.dono === me.usuario || e.juntas === 'sim';
-        return (meu || e.visivel === 'sim') ? { ...e, meu, lembrete: meu ? e.lembrete : '' }
+        return (meu || e.visivel === 'sim') ? { ...e, meu, podeExcluir: meu || me.papel === 'admin' }
           : { id: e.id, dono: e.dono, data: e.data, inicio: e.inicio, fim: e.fim, diaInteiro: e.diaInteiro, oculto: true, meu: false };
       }) };
       case 'salvarEvento': {
@@ -821,7 +982,7 @@ const Demo = (() => {
         else ev.push({ ...rec, id: nid() });
         return { ok: true };
       }
-      case 'excluirEvento': ev = ev.filter(e => !(e.id === p.id && (e.dono === me.usuario || e.juntas === 'sim'))); return { ok: true };
+      case 'excluirEvento': ev = ev.filter(e => !(e.id === p.id && (e.dono === me.usuario || e.juntas === 'sim' || (me.papel === 'admin' && e.visivel === 'sim')))); return { ok: true };
       case 'financeiro': return { ok: true, podeEditar: adm(), contas: JSON.parse(JSON.stringify(contas)), movs: JSON.parse(JSON.stringify(movs)) };
       case 'salvarEmail': me.email = p.email; return { ok: true, user: me };
       case 'trocarSenha': return (p.nova || '').length < 6 ? err('A nova senha precisa ter pelo menos 6 caracteres.') : { ok: true };
