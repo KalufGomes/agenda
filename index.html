@@ -95,6 +95,7 @@ nav.bottom button.on svg{color:var(--gold)}
 .legend{display:flex;gap:14px;justify-content:center;font-size:12px;color:var(--muted);margin-top:8px}
 .legend span{display:flex;align-items:center;gap:5px}
 .ev{display:flex;gap:12px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:8px;align-items:stretch;width:100%;text-align:left}
+.ev .bar.duo{background:linear-gradient(var(--gold) 50%,var(--blue) 50%)!important}
 .ev .bar{width:4px;border-radius:4px;flex:none}
 .ev .t{font-size:12.5px;color:var(--muted);font-weight:600;min-width:46px}
 .ev .body{flex:1;min-width:0}
@@ -207,7 +208,7 @@ nav.bottom button.on svg{color:var(--gold)}
    CONFIGURAÇÃO — cole aqui a URL do Apps Script (termina em /exec).
    Enquanto estiver vazia, o app roda em MODO DEMONSTRAÇÃO.
    ============================================================ */
-const API_URL = 'https://script.google.com/macros/s/AKfycbxDcUBx8zx0Oe7KII2IRSCGTpmHCsCKIbl-4EcMApZrO3J5pf09N2-KItQV5uK6iMAD/exec';
+const API_URL = '';
 
 /* ---------------- utilidades ---------------- */
 const $ = s => document.querySelector(s);
@@ -340,7 +341,7 @@ function renderAgenda() {
   let cells = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map(d => `<div class="wd">${d}</div>`).join('');
   for (let i = 0; i < 42; i++) {
     const d = new Date(ini.getFullYear(), ini.getMonth(), ini.getDate() + i), k = ymd(d);
-    const donos = [...new Set((porDia[k] || []).map(e => e.dono))];
+    const donos = [...new Set((porDia[k] || []).flatMap(e => e.juntas === 'sim' ? S.users.map(u => u.usuario) : [e.dono]))];
     const cls = ['day', d.getMonth() !== m ? 'out' : '', k === hoje() ? 'today' : '', k === S.dia ? 'sel' : ''].join(' ');
     cells += `<button class="${cls}" data-d="${k}"><span class="n">${d.getDate()}</span><span class="dots">${donos.map(u => `<i style="background:${userOf(u).cor}"></i>`).join('')}</span></button>`;
   }
@@ -353,11 +354,12 @@ function renderAgenda() {
     const u = userOf(e.dono), hora = e.diaInteiro === 'sim' ? 'Dia<br>inteiro' : `${e.inicio}<br><span style="font-weight:400">${e.fim}</span>`;
     if (e.oculto) return `<div class="ev hidden"><span class="bar" style="background:${u.cor}"></span><span class="t">${hora}</span>
       <div class="body"><div class="tt">Indisponível</div><div class="meta">${ICON.lock} Horário ocupado de ${esc(u.nome)}</div></div></div>`;
-    const quem = e.meu
+    const duo = e.juntas === 'sim';
+    const quem = duo ? `<span style="font-weight:600;color:var(--navy)">👥 Nós duas</span>` : e.meu
       ? (e.visivel === 'sim' ? `<span>${ICON.eye} ${esc(outra().nome)} vê</span>` : `<span>${ICON.lock} Só você vê</span>`)
       : `<span style="color:${u.cor};font-weight:600">● ${esc(u.nome)}</span>`;
-    return `<button class="ev" data-id="${e.id}"><span class="bar" style="background:${u.cor}"></span><span class="t">${hora}</span>
-      <div class="body"><div class="tt">${esc(e.titulo)}</div><div class="meta">${quem}${e.local ? `<span>${ICON.pin} ${esc(e.local)}</span>` : ''}${e.meu && Number(e.lembrete) ? `<span>${ICON.bell}</span>` : ''}</div></div></button>`;
+    return `<button class="ev" data-id="${e.id}"><span class="bar ${duo ? 'duo' : ''}" style="background:${u.cor}"></span><span class="t">${hora}</span>
+      <div class="body"><div class="tt">${esc(e.titulo)}</div><div class="meta">${quem}${e.local ? `<span>${ICON.pin} ${esc(e.local)}</span>` : ''}${e.meu && Number(e.lembrete) ? `<span>${ICON.bell}</span>` : ''}${duo ? `<span>por ${esc(u.nome)}</span>` : ''}</div></div></button>`;
   }).join('');
 
   $('#v-agenda').innerHTML = `
@@ -365,7 +367,7 @@ function renderAgenda() {
       <div class="cal-head"><h2>${MESES[m]} ${y}</h2>
         <div class="cal-nav"><button class="icon-btn" id="mPrev">${ICON.left}</button><button class="btn ghost sm" id="mHoje">Hoje</button><button class="icon-btn" id="mNext">${ICON.right}</button></div></div>
       <div class="grid">${cells}</div>
-      <div class="legend">${S.users.map(u => `<span><i class="dot" style="background:${u.cor}"></i>${esc(u.nome)}</span>`).join('')}</div>
+      <div class="legend">${S.users.map(u => `<span><i class="dot" style="background:${u.cor}"></i>${esc(u.nome)}</span>`).join('')}<span>👥 Nós duas</span></div>
     </div>
     <div class="sec-t">${SEMANA[sel.getDay()]}, ${sel.getDate()} de ${MESES[sel.getMonth()]}</div>
     ${evHtml || '<div class="empty">Nenhum compromisso neste dia.<br>Toque no <b>+</b> para marcar.</div>'}`;
@@ -386,8 +388,11 @@ function renderAgenda() {
 function abrirEvento(e) {
   const novo = !e.id, inteiro = e.diaInteiro === 'sim';
   const visivel = novo ? false : e.visivel === 'sim';
+  let juntas = e.juntas === 'sim';
   modal(`
     <h3>${novo ? 'Novo compromisso' : 'Editar compromisso'}</h3>
+    <label class="f"><span>Quem vai</span><div class="seg" id="eQuem" style="grid-template-columns:1fr 1fr">
+      <button type="button" data-q="eu">Só eu</button><button type="button" data-q="duas">👥 Nós duas</button></div></label>
     <label class="f"><span>Título</span><input class="in" id="eTit" value="${esc(e.titulo || '')}" placeholder="Ex.: Visita ao cliente"></label>
     <label class="f"><span>Data</span><input class="in" id="eData" type="date" value="${e.data || S.dia}"></label>
     <label class="switch"><input type="checkbox" id="eInt" ${inteiro ? 'checked' : ''}><div><b>Dia inteiro</b></div></label>
@@ -397,8 +402,9 @@ function abrirEvento(e) {
     </div>
     <label class="f"><span>Local (opcional)</span><input class="in" id="eLoc" value="${esc(e.local || '')}"></label>
     <label class="f"><span>Observações (opcional)</span><textarea class="in" id="eObs">${esc(e.obs || '')}</textarea></label>
-    <label class="switch"><input type="checkbox" id="eVis" ${visivel ? 'checked' : ''}>
+    <label class="switch" id="eVisBox"><input type="checkbox" id="eVis" ${visivel ? 'checked' : ''}>
       <div><b>Mostrar os detalhes para ${esc(outra().nome)}</b><small id="eVisTxt"></small></div></label>
+    <p class="hint" id="eDuoTxt" hidden>Aparece completo na agenda das duas, as duas podem editar e as duas recebem o aviso por e-mail.</p>
     <label class="f"><span>Aviso por e-mail</span><select class="in" id="eLem">
       ${[['0', 'Sem aviso'], ['15', '15 minutos antes'], ['30', '30 minutos antes'], ['60', '1 hora antes'], ['1440', '1 dia antes']]
         .map(([v, t]) => `<option value="${v}" ${String(e.lembrete ?? '30') === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
@@ -407,11 +413,17 @@ function abrirEvento(e) {
     ? `${outra().nome} verá título, local e observações.`
     : `${outra().nome} verá só "Indisponível" nesse horário.`;
   visTxt(); $('#eVis').onchange = visTxt;
+  const quem = () => {
+    document.querySelectorAll('#eQuem button').forEach(b => b.classList.toggle('on', (b.dataset.q === 'duas') === juntas));
+    $('#eVisBox').hidden = juntas; $('#eDuoTxt').hidden = !juntas;
+  };
+  document.querySelectorAll('#eQuem button').forEach(b => b.onclick = () => { juntas = b.dataset.q === 'duas'; quem(); });
+  quem();
   $('#eInt').onchange = () => $('#eHoras').hidden = $('#eInt').checked;
   $('#eSalvar').onclick = async () => {
     const ev = { id: e.id, titulo: $('#eTit').value, data: $('#eData').value, diaInteiro: $('#eInt').checked,
       inicio: $('#eIni').value, fim: $('#eFim').value, local: $('#eLoc').value, obs: $('#eObs').value,
-      visivel: $('#eVis').checked, lembrete: $('#eLem').value };
+      visivel: juntas || $('#eVis').checked, juntas, lembrete: $('#eLem').value };
     try { await api('salvarEvento', { evento: ev }); fecharModal(); S.dia = ev.data; toast('Compromisso salvo'); carregarAgenda(); }
     catch (er) { toast(er.message); }
   };
@@ -762,7 +774,7 @@ const Demo = (() => {
     { id: nid(), dono: 'taise', titulo: 'Visita ao cliente', data: d(0), inicio: '09:00', fim: '10:30', diaInteiro: 'nao', local: 'Loja do cliente', obs: '', visivel: 'sim', lembrete: '30' },
     { id: nid(), dono: 'raquel', titulo: 'Consulta médica', data: d(0), inicio: '14:00', fim: '15:00', diaInteiro: 'nao', local: '', obs: '', visivel: 'nao', lembrete: '60' },
     { id: nid(), dono: 'taise', titulo: 'Reunião na escola', data: d(1), inicio: '07:30', fim: '08:30', diaInteiro: 'nao', local: '', obs: '', visivel: 'nao', lembrete: '0' },
-    { id: nid(), dono: 'raquel', titulo: 'Treinamento de liderança', data: d(2), inicio: '10:00', fim: '12:00', diaInteiro: 'nao', local: 'Cliente', obs: 'Encontro 2 de 4', visivel: 'sim', lembrete: '30' },
+    { id: nid(), dono: 'raquel', titulo: 'Treinamento de liderança', data: d(2), inicio: '10:00', fim: '12:00', diaInteiro: 'nao', local: 'Cliente', obs: 'Encontro 2 de 4', visivel: 'sim', lembrete: '30', juntas: 'sim' },
     { id: nid(), dono: 'taise', titulo: 'Aniversário da família', data: d(4), inicio: '', fim: '', diaInteiro: 'sim', local: '', obs: '', visivel: 'nao', lembrete: '0' }
   ];
   let contas = [
@@ -794,7 +806,7 @@ const Demo = (() => {
       case 'me': return { ok: true, user: me, usuarios: users };
       case 'sair': me = null; return { ok: true };
       case 'agenda': return { ok: true, eventos: ev.filter(e => e.data >= p.de && e.data <= p.ate).map(e => {
-        const meu = e.dono === me.usuario;
+        const meu = e.dono === me.usuario || e.juntas === 'sim';
         return (meu || e.visivel === 'sim') ? { ...e, meu, lembrete: meu ? e.lembrete : '' }
           : { id: e.id, dono: e.dono, data: e.data, inicio: e.inicio, fim: e.fim, diaInteiro: e.diaInteiro, oculto: true, meu: false };
       }) };
@@ -802,13 +814,14 @@ const Demo = (() => {
         const x = p.evento;
         if (!String(x.titulo || '').trim()) return err('Informe o título.');
         if (!x.diaInteiro && x.fim <= x.inicio) return err('O fim precisa ser depois do início.');
-        const rec = { ...x, dono: me.usuario, diaInteiro: x.diaInteiro ? 'sim' : 'nao', visivel: x.visivel ? 'sim' : 'nao',
+        const ant = x.id && ev.find(e => e.id === x.id);
+        const rec = { ...x, dono: ant ? ant.dono : me.usuario, juntas: x.juntas ? 'sim' : 'nao', diaInteiro: x.diaInteiro ? 'sim' : 'nao', visivel: x.visivel || x.juntas ? 'sim' : 'nao',
           inicio: x.diaInteiro ? '' : x.inicio, fim: x.diaInteiro ? '' : x.fim };
-        if (x.id) { const i = ev.findIndex(e => e.id === x.id); if (ev[i].dono !== me.usuario) return err('Só quem criou pode alterar.'); ev[i] = rec; }
+        if (x.id) { const i = ev.findIndex(e => e.id === x.id); if (ev[i].dono !== me.usuario && ev[i].juntas !== 'sim') return err('Só quem criou pode alterar.'); ev[i] = rec; }
         else ev.push({ ...rec, id: nid() });
         return { ok: true };
       }
-      case 'excluirEvento': ev = ev.filter(e => !(e.id === p.id && e.dono === me.usuario)); return { ok: true };
+      case 'excluirEvento': ev = ev.filter(e => !(e.id === p.id && (e.dono === me.usuario || e.juntas === 'sim'))); return { ok: true };
       case 'financeiro': return { ok: true, podeEditar: adm(), contas: JSON.parse(JSON.stringify(contas)), movs: JSON.parse(JSON.stringify(movs)) };
       case 'salvarEmail': me.email = p.email; return { ok: true, user: me };
       case 'trocarSenha': return (p.nova || '').length < 6 ? err('A nova senha precisa ter pelo menos 6 caracteres.') : { ok: true };
